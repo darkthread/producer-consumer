@@ -12,7 +12,10 @@ int producerCount = int.Parse(config.GetValue<string>("producerCount", "1"));
 int imgProcTime =  int.Parse(config.GetValue<string>("imgProcTime", "4000"));;
 int saveDbTime =  int.Parse(config.GetValue<string>("saveDbTime", "1000"));;
 
-var photoIds = new ConcurrentQueue<int>(Enumerable.Range(1, photoCount));
+var photoIds = new BlockingCollection<int>();
+for (int i = 1; i <= photoCount; i++) { photoIds.Add(i); }
+photoIds.CompleteAdding();
+
 var blockQueue = new BlockingCollection<SimuImgData>(queueSize);
 var rnd = new Random();
 
@@ -39,36 +42,26 @@ void Print(string msg, ConsoleColor color = ConsoleColor.White) {
 }
 
 void RunProducer() {
-    while (photoIds.Any()) {
-        if (photoIds.TryDequeue(out var id)) {
-            //模擬照片縮放、縮圖作業延遲
-            RandomDelay(imgProcTime);
-            //若達到queueSize上限，Add動作會被Block住
-            blockQueue.Add(new SimuImgData{
-                Id = id,
-                Image = Array.Empty<byte>()
-            });
-            Print($"{DateTime.Now:mm:ss} Photo {id} is processed", ConsoleColor.Yellow);
-        }
+    foreach (int id in photoIds.GetConsumingEnumerable()) 
+    {
+        //模擬照片縮放、縮圖作業延遲
+        RandomDelay(imgProcTime);
+        //若達到queueSize上限，Add動作會被Block住
+        blockQueue.Add(new SimuImgData{
+            Id = id,
+            Image = Array.Empty<byte>()
+        });
+        Print($"{DateTime.Now:mm:ss} Photo {id} is processed", ConsoleColor.Yellow);
     }
 }
 
 void RunConsumer()
 {
-    //IsComplete 表示生產者已不再新增資料，blockQueue 的資料也消化完畢
-    while (!blockQueue.IsCompleted) 
+    foreach (var data in blockQueue.GetConsumingEnumerable())
     {
-        SimuImgData data = null!;
-        try {
-            //若blockQueue沒有資料，Take動作會被Block住，有資料時再往下執行
-            //若
-            data = blockQueue.Take();
-        } catch (InvalidOperationException) {}
-        if (data != null) {
-            //模擬寫入資料庫延遲
-            RandomDelay(saveDbTime);
-            Print($"{DateTime.Now:mm:ss} Photo {data.Id} is saved to DB", ConsoleColor.Cyan);
-        }
+        //模擬寫入資料庫延遲
+        RandomDelay(saveDbTime);
+        Print($"{DateTime.Now:mm:ss} Photo {data.Id} is saved to DB", ConsoleColor.Cyan);
     }
     sw.Stop();
     Console.ForegroundColor = ConsoleColor.White;
